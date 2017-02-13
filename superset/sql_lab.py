@@ -11,7 +11,8 @@ from sqlalchemy.pool import NullPool
 from sqlalchemy.orm import sessionmaker
 
 from superset import (
-    app, db, models, utils, dataframe, results_backend, sql_parse, sm)
+    app, db, models, utils, dataframe, results_backend)
+from superset.sql_parse import SupersetQuery
 from superset.db_engine_specs import LimitMethod
 from superset.jinja_context import get_template_processor
 QueryStatus = models.QueryStatus
@@ -19,28 +20,25 @@ QueryStatus = models.QueryStatus
 celery_app = celery.Celery(config_source=app.config.get('CELERY_CONFIG'))
 
 
-def create_table_as(sql, table_name, schema=None, override=False):
-    """Reformats the query into the create table as query.
+def dedup(l, suffix='__'):
+    """De-duplicates a list of string by suffixing a counter
 
-    Works only for the single select SQL statements, in all other cases
-    the sql query is not modified.
-    :param superset_query: string, sql query that will be executed
-    :param table_name: string, will contain the results of the query execution
-    :param override, boolean, table table_name will be dropped if true
-    :return: string, create table as query
+    Always returns the same number of entries as provided, and always returns
+    unique values.
+
+    >>> dedup(['foo', 'bar', 'bar', 'bar'])
+    ['foo', 'bar', 'bar__1', 'bar__2']
     """
-    # TODO(bkyryliuk): enforce that all the columns have names. Presto requires it
-    #                  for the CTA operation.
-    # TODO(bkyryliuk): drop table if allowed, check the namespace and
-    #                  the permissions.
-    # TODO raise if multi-statement
-    if schema:
-        table_name = schema + '.' + table_name
-    exec_sql = ''
-    if override:
-        exec_sql = 'DROP TABLE IF EXISTS {table_name};\n'
-    exec_sql += "CREATE TABLE {table_name} AS \n{sql}"
-    return exec_sql.format(**locals())
+    new_l = []
+    seen = {}
+    for s in l:
+        if s in seen:
+            seen[s] += 1
+            s += suffix + str(seen[s])
+        else:
+            seen[s] = 0
+        new_l.append(s)
+    return new_l
 
 
 @celery_app.task(bind=True)
@@ -52,14 +50,11 @@ def get_sql_results(self, query_id, return_results=True, store_results=False):
         session_class = sessionmaker()
         session_class.configure(bind=engine)
         session = session_class()
-	#session.expire_on_commit = False  # Hiddenbugskiller - Issue - Detached Error fix.
     else:
         session = db.session()
-     	#session.expire_on_commit = False  # Hiddenbugskiller - Issue - Detached Error fix.
         session.commit()  # HACK
     query = session.query(models.Query).filter_by(id=query_id).one()
     database = query.database
-    executed_sql = query.sql.strip().strip(';')
     db_engine_spec = database.db_engine_spec
 
     def handle_error(msg):
@@ -70,8 +65,12 @@ def get_sql_results(self, query_id, return_results=True, store_results=False):
         session.commit()
         raise Exception(query.error_message)
 
+    if store_results and not results_backend:
+        handle_error("Results backend isn't configured.")
+
     # Limit enforced only for retrieving the data, not for the CTA queries.
-    superset_query = sql_parse.SupersetQuery(executed_sql)
+    superset_query = SupersetQuery(query.sql)
+    executed_sql = superset_query.stripped()
     if not superset_query.is_select() and not database.allow_dml:
         handle_error(
             "Only `SELECT` statements are allowed against this database")
@@ -85,8 +84,7 @@ def get_sql_results(self, query_id, return_results=True, store_results=False):
             query.tmp_table_name = 'tmp_{}_table_{}'.format(
                 query.user_id,
                 start_dttm.strftime('%Y_%m_%d_%H_%M_%S'))
-        executed_sql = create_table_as(
-            executed_sql, query.tmp_table_name, database.force_ctas_schema)
+        executed_sql = superset_query.as_create_table(query.tmp_table_name)
         query.select_as_cta_used = True
     elif (
             query.limit and superset_query.is_select() and
@@ -103,9 +101,10 @@ def get_sql_results(self, query_id, return_results=True, store_results=False):
         logging.exception(e)
         msg = "Template rendering failed: " + utils.error_msg_from_exception(e)
         handle_error(msg)
+
+    query.executed_sql = executed_sql
+    logging.info("Running query: \n{}".format(executed_sql))
     try:
-        query.executed_sql = executed_sql
-        logging.info("Running query: \n{}".format(executed_sql))
         result_proxy = engine.execute(query.executed_sql, schema=query.schema)
     except Exception as e:
         logging.exception(e)
@@ -119,6 +118,7 @@ def get_sql_results(self, query_id, return_results=True, store_results=False):
     cdf = None
     if result_proxy.cursor:
         column_names = [col[0] for col in result_proxy.cursor.description]
+        column_names = dedup(column_names)
         if db_engine_spec.limit_method == LimitMethod.FETCH_MANY:
             data = result_proxy.fetchmany(query.limit)
         else:
@@ -134,7 +134,10 @@ def get_sql_results(self, query_id, return_results=True, store_results=False):
         query.rows = cdf.size
     if query.select_as_cta:
         query.select_sql = '{}'.format(database.select_star(
-            query.tmp_table_name, limit=query.limit))
+            query.tmp_table_name,
+            limit=query.limit,
+            schema=database.force_ctas_schema
+        ))
     query.end_time = utils.now_as_float()
     session.flush()
 
@@ -148,10 +151,10 @@ def get_sql_results(self, query_id, return_results=True, store_results=False):
     payload['query'] = query.to_dict()
     payload = json.dumps(payload, default=utils.json_iso_dttm_ser)
 
-    if store_results and results_backend:
+    if store_results:
         key = '{}'.format(uuid.uuid4())
         logging.info("Storing results in results backend, key: {}".format(key))
-        results_backend.set(key, zlib.compress(payload),ex=3600)
+        results_backend.set(key, zlib.compress(payload))
         query.results_key = key
 
     session.flush()

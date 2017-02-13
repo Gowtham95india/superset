@@ -20,12 +20,20 @@ from superset import app
 config = app.config
 
 TIMESTAMP_CHOICES = [
-    ('smart_date', 'Adaptative formating'),
+    ('smart_date', 'Adaptive formatting'),
     ("%m/%d/%Y", '"%m/%d/%Y" | 01/14/2019'),
     ("%Y-%m-%d", '"%Y-%m-%d" | 2019-01-14'),
     ("%Y-%m-%d %H:%M:%S",
      '"%Y-%m-%d %H:%M:%S" | 2019-01-14 01:32:10'),
     ("%H:%M:%S", '"%H:%M:%S" | 01:32:10'),
+]
+AXIS_FORMAT_CHOICES = [
+    ('.3s', '".3s" | 12.3k'),
+    ('.3%', '".3%" | 1234543.210%'),
+    ('.4r', '".4r" | 12350'),
+    ('.3f', '".3f" | 12345.432'),
+    ('+,', '"+," | +12,345.4321'),
+    ('$,.2f', '"$,.2f" | $12,345.43'),
 ]
 D3_FORMAT_DOCS = _(
     "D3 format syntax "
@@ -161,6 +169,12 @@ class FormFactory(object):
                 "choices": datasource.metrics_combo,
                 "default": default_metric,
                 "description": _("Choose the metric")
+            }),
+            'metric_2': (SelectField, {
+                "label": _("Right Axis Metric"),
+                "choices": datasource.metrics_combo,
+                "default": default_metric,
+                "description": _("Choose the metric for second y axis")
             }),
             'stacked_style': (SelectField, {
                 "label": _("Chart Style"),
@@ -340,7 +354,7 @@ class FormFactory(object):
                 "choices": self.choicify(['auto', 50, 75, 100, 125, 150, 200]),
                 "default": 'auto',
                 "description": _(
-                    "Bottom marging, in pixels, allowing for more room for "
+                    "Bottom margin, in pixels, allowing for more room for "
                     "axis labels"),
             }),
             'page_length': (FreeFormSelectField, {
@@ -550,7 +564,7 @@ class FormFactory(object):
             }),
             'row_limit': (FreeFormSelectField, {
                 "label": _('Row limit'),
-                "default": config.get("ROW_LIMIT"),
+                "default": config.get("VIZ_ROW_LIMIT"),
                 "choices": self.choicify(
                     [10, 50, 100, 250, 500, 1000, 5000, 10000, 50000])
             }),
@@ -679,14 +693,13 @@ class FormFactory(object):
             'y_axis_format': (FreeFormSelectField, {
                 "label": _("Y axis format"),
                 "default": '.3s',
-                "choices": [
-                    ('.3s', '".3s" | 12.3k'),
-                    ('.3%', '".3%" | 1234543.210%'),
-                    ('.4r', '".4r" | 12350'),
-                    ('.3f', '".3f" | 12345.432'),
-                    ('+,', '"+," | +12,345.4321'),
-                    ('$,.2f', '"$,.2f" | $12,345.43'),
-                ],
+                "choices": AXIS_FORMAT_CHOICES,
+                "description": D3_FORMAT_DOCS,
+            }),
+            'y_axis_2_format': (FreeFormSelectField, {
+                "label": _("Right axis format"),
+                "default": '.3s',
+                "choices": AXIS_FORMAT_CHOICES,
                 "description": D3_FORMAT_DOCS,
             }),
             'markup_type': (SelectField, {
@@ -783,6 +796,12 @@ class FormFactory(object):
                 "default": False,
                 "description": _(
                     "Whether to include a client side search box")
+            }),
+            'table_filter': (BetterBooleanField, {
+                "label": _("Table Filter"),
+                "default": False,
+                "description": _(
+                    "Whether to apply filter when table cell is clicked")
             }),
             'show_bubbles': (BetterBooleanField, {
                 "label": _("Show Bubbles"),
@@ -980,6 +999,36 @@ class FormFactory(object):
                     ("rgb(34, 139, 34)", "Forest Green"),
                 ],
                 "description": _("The color for points and clusters in RGB")
+            }),
+            'ranges': (TextField, {
+                "label": _("Ranges"),
+                "default": "",
+                "description": _("Ranges to highlight with shading")
+            }),
+            'range_labels': (TextField, {
+                "label": _("Range labels"),
+                "default": "",
+                "description": _("Labels for the ranges")
+            }),
+            'markers': (TextField, {
+                "label": _("Markers"),
+                "default": "",
+                "description": _("List of values to mark with triangles")
+            }),
+            'marker_labels': (TextField, {
+                "label": _("Marker labels"),
+                "default": "",
+                "description": _("Labels for the markers")
+            }),
+            'marker_lines': (TextField, {
+                "label": _("Marker lines"),
+                "default": "",
+                "description": _("List of values to mark with lines")
+            }),
+            'marker_line_labels': (TextField, {
+                "label": _("Marker line labels"),
+                "default": "",
+                "description": _("Labels for the marker lines")
             }),
         }
 

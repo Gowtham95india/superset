@@ -9,6 +9,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+import imp
 import json
 import os
 
@@ -29,12 +30,14 @@ with open(PACKAGE_FILE) as package_file:
     VERSION_STRING = json.load(package_file)['version']
 
 ROW_LIMIT = 50000
+VIZ_ROW_LIMIT = 10000
 SUPERSET_WORKERS = 2
+SUPERSET_CELERY_WORKERS = 32
 
 SUPERSET_WEBSERVER_ADDRESS = '0.0.0.0'
 SUPERSET_WEBSERVER_PORT = 8088
 SUPERSET_WEBSERVER_TIMEOUT = 60
-
+EMAIL_NOTIFICATIONS = False
 CUSTOM_SECURITY_MANAGER = None
 # ---------------------------------------------------------
 
@@ -67,15 +70,19 @@ ENABLE_PROXY_FIX = False
 # Uncomment to setup Your App name
 APP_NAME = "Superset"
 
-# Uncomment to setup Setup an App icon
-APP_ICON = "/static/assets/images/superset_logo.png"
+# Uncomment to setup an App icon
+APP_ICON = "/static/assets/images/superset-logo@2x.png"
 
 # Druid query timezone
 # tz.tzutc() : Using utc timezone
 # tz.tzlocal() : Using local timezone
+# tz.gettz('Asia/Shanghai') : Using the time zone with specific name
+# [TimeZone List]
+# See: https://en.wikipedia.org/wiki/List_of_tz_database_time_zones
 # other tz can be overridden by providing a local_config
 DRUID_IS_ACTIVE = True
 DRUID_TZ = tz.tzutc()
+DRUID_ANALYSIS_TYPES = ['cardinality']
 
 # ----------------------------------------------------
 # AUTHENTICATION CONFIG
@@ -167,10 +174,11 @@ VIZ_TYPE_BLACKLIST = []
 DRUID_DATA_SOURCE_BLACKLIST = []
 
 # --------------------------------------------------
-# Modules and datasources to be registered
+# Modules, datasources and middleware to be registered
 # --------------------------------------------------
 DEFAULT_MODULE_DS_MAP = {'superset.models': ['DruidDatasource', 'SqlaTable']}
 ADDITIONAL_MODULE_DS_MAP = {}
+ADDITIONAL_MIDDLEWARE = []
 
 """
 1) http://docs.python-guide.org/en/latest/writing/logging/
@@ -198,7 +206,8 @@ BACKUP_COUNT = 30
 MAPBOX_API_KEY = ""
 
 # Maximum number of rows returned in the SQL editor
-SQL_MAX_ROW = 1000
+SQL_MAX_ROW = 1000000
+DISPLAY_SQL_MAX_ROW = 1000
 
 # If defined, shows this text in an alert-warning box in the navbar
 # one example use case may be "STAGING" to make it clear that this is
@@ -233,6 +242,9 @@ DEFAULT_DB_ID = None
 # Timeout duration for SQL Lab synchronous queries
 SQLLAB_TIMEOUT = 30
 
+# SQLLAB_DEFAULT_DBID
+SQLLAB_DEFAULT_DBID = None
+
 # An instantiated derivative of werkzeug.contrib.cache.BaseCache
 # if enabled, it can be used to store the results of long-running queries
 # in SQL Lab by using the "Run Async" button/feature
@@ -248,11 +260,28 @@ JINJA_CONTEXT_ADDONS = {}
 # by humans.
 ROBOT_PERMISSION_ROLES = ['Public', 'Gamma', 'Alpha', 'Admin', 'sql_lab']
 
+CONFIG_PATH_ENV_VAR = 'SUPERSET_CONFIG_PATH'
+
 try:
+    if CONFIG_PATH_ENV_VAR in os.environ:
+        # Explicitly import config module that is not in pythonpath; useful
+        # for case where app is being executed via pex.
+        imp.load_source('superset_config', os.environ[CONFIG_PATH_ENV_VAR])
+
     from superset_config import *  # noqa
     print('Loaded your LOCAL configuration')
 except ImportError:
     pass
+
+# smtp server configuration
+EMAIL_NOTIFICATIONS = False  # all the emails are sent using dryrun
+SMTP_HOST = 'localhost'
+SMTP_STARTTLS = True
+SMTP_SSL = False
+SMTP_USER = 'superset'
+SMTP_PORT = 25
+SMTP_PASSWORD = 'superset'
+SMTP_MAIL_FROM = 'superset@superset.com'
 
 if not CACHE_DEFAULT_TIMEOUT:
     CACHE_DEFAULT_TIMEOUT = CACHE_CONFIG.get('CACHE_DEFAULT_TIMEOUT')

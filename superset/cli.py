@@ -21,6 +21,12 @@ manager = Manager(app)
 manager.add_command('db', MigrateCommand)
 
 
+@manager.command
+def init():
+    """Inits the Superset application"""
+    security.sync_role_definitions()
+
+
 @manager.option(
     '-d', '--debug', action='store_true',
     help="Start the web server in debug mode")
@@ -56,12 +62,6 @@ def runserver(debug, address, port, timeout, workers):
             "superset:app").format(**locals())
         print("Starting server with command: " + cmd)
         Popen(cmd, shell=True).wait()
-
-
-@manager.command
-def init():
-    """Inits the Superset application"""
-    security.sync_role_definitions()
 
 
 @manager.option(
@@ -119,13 +119,19 @@ def load_examples(load_test_data):
     help=(
         "Specify which datasource name to load, if omitted, all "
         "datasources will be refreshed"))
-def refresh_druid(datasource):
+@manager.option(
+    '-m', '--merge',
+    help=(
+        "Specify using 'merge' property during operation. "
+        "Default value is False "))
+def refresh_druid(datasource, merge):
     """Refresh druid datasources"""
     session = db.session()
     from superset import models
     for cluster in session.query(models.DruidCluster).all():
         try:
-            cluster.refresh_datasources(datasource_name=datasource)
+            cluster.refresh_datasources(datasource_name=datasource,
+                                        merge_flag=merge)
         except Exception as e:
             print(
                 "Error while processing cluster '{}'\n{}".format(
@@ -138,8 +144,10 @@ def refresh_druid(datasource):
     session.commit()
 
 
-@manager.command
-def worker():
+@manager.option(
+    '-w', '--workers', default=config.get("SUPERSET_CELERY_WORKERS", 32),
+    help="Number of celery server workers to fire up")
+def worker(workers):
     """Starts a Superset worker for async SQL query execution."""
     # celery -A tasks worker --loglevel=info
     print("Starting SQL Celery worker.")
@@ -153,5 +161,6 @@ def worker():
         'broker': config.get('CELERY_CONFIG').BROKER_URL,
         'loglevel': 'INFO',
         'traceback': True,
+        'concurrency': int(workers),
     }
     c_worker.run(**options)
